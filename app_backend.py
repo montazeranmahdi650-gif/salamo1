@@ -1,6 +1,3 @@
-# app_backend.py - سرویس تحلیلگر پایتون (Flask)
-# پیش‌نیاز: pip install flask flask-cors
-
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import json
@@ -10,7 +7,6 @@ app = Flask(__name__)
 # فعال‌سازی CORS برای اجازه دادن به درخواست از افزونه کروم
 CORS(app)
 
-# --- شبیه‌سازی API تودرتو ---
 FORBIDDEN_HOST = "melliun.org"
 
 
@@ -20,9 +16,9 @@ def check_nested_api_logic(content_data):
     """
     article_text = content_data.get('text', '')
     links_to_check = content_data.get('links', [])
-    image_sources = content_data.get('imageSources', [])  # دریافت منابع تصاویر
+    image_sources = content_data.get('imageSources', [])
 
-    # 0. HIGH-PRIORITY: بررسی منابع تصویر (برای مسدودسازی محتوای بصری از سایت ممنوعه)
+    # 0. HIGH-PRIORITY: بررسی منابع تصویر
     has_forbidden_image = any(FORBIDDEN_HOST in src for src in image_sources)
     if has_forbidden_image:
         return {
@@ -50,6 +46,12 @@ def check_nested_api_logic(content_data):
     return {"action": "ALLOW", "reason": "Content is clear."}
 
 
+# مسیر جدید: مسیر اصلی (/) برای بررسی وضعیت سرور (این خط اضافه شده است!)
+@app.route('/', methods=['GET'])
+def home():
+    return "Python Content Filter API is running!", 200
+
+
 @app.route('/analyze_content_api', methods=['POST'])
 def analyze_content_api():
     """ نقطه پایانی که افزونه کروم آن را فراخوانی می‌کند. """
@@ -62,8 +64,4 @@ def analyze_content_api():
 
     return jsonify(result)
 
-
-if __name__ == '__main__':
-    # استفاده از پورت 5050
-    print("Python Backend API running on http://127.0.0.1:5050")
-    app.run(port=5050)
+# بخش اجرای محلی حذف شده است.
