@@ -7,12 +7,15 @@ import requests
 import hashlib
 import os
 import sys
+import time
+from datetime import datetime, timedelta
+from collections import defaultdict
 
 app = Flask(__name__)
 # فعال‌سازی CORS برای اجازه دادن به درخواست از افزونه کروم
 CORS(app)
 
-FORBIDDEN_HOST = "melliun.org"
+FORBIDDEN_HOSTS = ["melliun.org", "nejatngo.org", "dw.com", "hammihanonline.ir"]
 keyword_lock = Lock()
 image_hash_lock = Lock()
 
@@ -23,6 +26,14 @@ CONTENT_HISTORY_LOCK = Lock()
 # 🚨 فهرست جدید: فهرست هَش‌های تصاویر ممنوعه (SHA256) که به طور خودکار یاد گرفته شده‌اند.
 # در محیط واقعی، اینها باید در یک دیتابیس دائمی ذخیره شوند.
 FORBIDDEN_IMAGE_HASHES = set()
+
+# 🚨 سیستم لاگ‌گیری: ذخیره لاگ‌های کاربران بر اساس IP
+USER_LOGS = defaultdict(list)
+USER_LOGS_LOCK = Lock()
+# محدودیت تعداد لاگ‌های هر کاربر
+MAX_LOGS_PER_USER = 1000
+# مدت زمان نگهداری لاگ‌ها (روز)
+LOG_RETENTION_DAYS = 30
 
 # تنظیمات هدر برای جلوگیری از مسدود شدن توسط سرورهای عکس
 REQUEST_HEADERS = {
@@ -41,6 +52,61 @@ SENSITIVE_KEYWORDS = {
     r'(?:\s|^)اعدام', r'(?:\s|^)نظام', r'(?:\s|^)ولایت\sفقیه', r'(?:\s|^)ملا',
     r'(?:\s|^)قوه\sقضاییه', r'(?:\s|^)زندانی\sسیاسی', r'(?:\s|^)دیکتاتور'
 }
+
+
+def get_client_ip():
+    """دریافت IP کاربر از هدرهای درخواست"""
+    if request.headers.get('X-Forwarded-For'):
+        return request.headers.get('X-Forwarded-For').split(',')[0]
+    elif request.headers.get('X-Real-IP'):
+        return request.headers.get('X-Real-IP')
+    return request.remote_addr
+
+
+def log_user_activity(ip_address, activity_type, details):
+    """ذخیره فعالیت کاربر در سیستم لاگ"""
+    with USER_LOGS_LOCK:
+        # پاک کردن لاگ‌های قدیمی
+        current_time = time.time()
+        if ip_address in USER_LOGS:
+            USER_LOGS[ip_address] = [
+                log for log in USER_LOGS[ip_address]
+                if current_time - log['timestamp'] <= LOG_RETENTION_DAYS * 86400
+            ]
+
+        # ایجاد لاگ جدید
+        log_entry = {
+            'timestamp': current_time,
+            'datetime': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'activity_type': activity_type,
+            'details': details,
+            'user_agent': request.headers.get('User-Agent', 'Unknown'),
+            'url': request.url if request.method == 'GET' else None
+        }
+
+        # اضافه کردن لاگ جدید
+        USER_LOGS[ip_address].append(log_entry)
+
+        # محدود کردن تعداد لاگ‌ها
+        if len(USER_LOGS[ip_address]) > MAX_LOGS_PER_USER:
+            USER_LOGS[ip_address] = USER_LOGS[ip_address][-MAX_LOGS_PER_USER:]
+
+        return log_entry
+
+
+def cleanup_old_logs():
+    """پاک‌سازی لاگ‌های قدیمی"""
+    with USER_LOGS_LOCK:
+        current_time = time.time()
+        cutoff_time = current_time - (LOG_RETENTION_DAYS * 86400)
+
+        for ip in list(USER_LOGS.keys()):
+            USER_LOGS[ip] = [
+                log for log in USER_LOGS[ip]
+                if log['timestamp'] > cutoff_time
+            ]
+            if not USER_LOGS[ip]:
+                del USER_LOGS[ip]
 
 
 def get_image_hash(url):
@@ -136,8 +202,8 @@ def simulate_learning(content_data):
     newly_added_hashes = 0
     with image_hash_lock:
         for src in image_sources:
-            # فقط URLهایی را یاد بگیر که از FORBIDDEN_HOST می آیند
-            if FORBIDDEN_HOST in src:
+            # فقط URLهایی را یاد بگیر که از یکی از FORBIDDEN_HOSTS می آیند
+            if any(host in src for host in FORBIDDEN_HOSTS):  # 🚨 تغییر این خط
                 img_hash = get_image_hash(src)
                 if img_hash and img_hash not in FORBIDDEN_IMAGE_HASHES:
                     FORBIDDEN_IMAGE_HASHES.add(img_hash)
@@ -146,7 +212,7 @@ def simulate_learning(content_data):
     return newly_added_keywords, newly_added_hashes
 
 
-def check_nested_api_logic(content_data):
+def check_nested_api_logic(content_data, ip_address=None):
     """
     اجرای منطق API تودرتوی چندلایه با منطق فیلترینگ تقویت شده و یادگیری خودکار.
     """
@@ -155,8 +221,8 @@ def check_nested_api_logic(content_data):
     image_sources = content_data.get('imageSources', [])
 
     # 0. بررسی اولیه برای اجرای یادگیری
-    has_forbidden_source = any(FORBIDDEN_HOST in src for src in image_sources) or any(
-        FORBIDDEN_HOST in link for link in links_to_check)
+    has_forbidden_source = any(any(host in src for host in FORBIDDEN_HOSTS) for src in image_sources) or any(
+        any(host in link for host in FORBIDDEN_HOSTS) for link in links_to_check)
 
     if has_forbidden_source:
         new_k, new_i = simulate_learning(content_data)
@@ -169,28 +235,61 @@ def check_nested_api_logic(content_data):
         for src in image_sources:
             current_hash = get_image_hash(src)
             if current_hash and current_hash in FORBIDDEN_IMAGE_HASHES:
+                # ثبت لاگ
+                if ip_address:
+                    log_user_activity(ip_address, 'FILTER_HARD', {
+                        'action': 'FILTER_HARD',
+                        'reason': 'HIGH_PRIORITY: Known Forbidden Image Hash Detected',
+                        'image_url': src[:100],
+                        'content_preview': article_text[:200]
+                    })
                 return {
                     "action": "FILTER_HARD",
                     "reason": "HIGH_PRIORITY: Known Forbidden Image Hash Detected"
                 }
 
     # 2. بررسی مستقیم منبع ممنوعه (برای تصویر یا لینک) - این یک فیلتر پشتیبان سریع است.
-    if any(FORBIDDEN_HOST in src for src in image_sources):
+    if any(any(host in src for host in FORBIDDEN_HOSTS) for src in image_sources):
+        # ثبت لاگ
+        if ip_address:
+            log_user_activity(ip_address, 'FILTER_HARD', {
+                'action': 'FILTER_HARD',
+                'reason': 'HIGH_PRIORITY: Image Source from Forbidden Host Detected (URL Match)',
+                'forbidden_hosts': FORBIDDEN_HOSTS,
+                'content_preview': article_text[:200]
+            })
         return {
             "action": "FILTER_HARD",
             "reason": "HIGH_PRIORITY: Image Source from Forbidden Host Detected (URL Match)"
         }
 
     # 3. منطق لینک و متن
-    has_forbidden_link = any(FORBIDDEN_HOST in link for link in links_to_check)
+    has_forbidden_link = any(any(host in link for host in FORBIDDEN_HOSTS) for link in links_to_check)
 
     if has_forbidden_link:
         if len(article_text) > 100 and check_keyword_robust(article_text):
+            # ثبت لاگ
+            if ip_address:
+                log_user_activity(ip_address, 'FILTER_HARD', {
+                    'action': 'FILTER_HARD',
+                    'reason': 'Nested Logic: Forbidden Link + Sensitive Topic Match (Robust)',
+                    'forbidden_links': [link[:100] for link in links_to_check if
+                                        any(host in link for host in FORBIDDEN_HOSTS)],
+                    'content_preview': article_text[:200]
+                })
             return {
                 "action": "FILTER_HARD",
                 "reason": "Nested Logic: Forbidden Link + Sensitive Topic Match (Robust)"
             }
         # اگر لینک ممنوعه بود اما موضوع حساس نبود، باز هم سخت مسدود کن (احتیاط بیشتر)
+        # ثبت لاگ
+        if ip_address:
+            log_user_activity(ip_address, 'FILTER_HARD', {
+                'action': 'FILTER_HARD',
+                'reason': 'HIGH_PRIORITY: Forbidden Link Detected',
+                'forbidden_links': [link[:100] for link in links_to_check if
+                                    any(host in link for host in FORBIDDEN_HOSTS)]
+            })
         return {
             "action": "FILTER_HARD",
             "reason": "HIGH_PRIORITY: Forbidden Link Detected"
@@ -198,8 +297,22 @@ def check_nested_api_logic(content_data):
 
     # 4. فیلترینگ سبک‌تر (بررسی فقط متن)
     if check_keyword_robust(article_text):
+        # ثبت لاگ
+        if ip_address:
+            log_user_activity(ip_address, 'FILTER_LIGHT', {
+                'action': 'FILTER_LIGHT',
+                'reason': 'Generic Sensitive Topic Found (Robust)',
+                'content_preview': article_text[:200]
+            })
         return {"action": "FILTER_LIGHT", "reason": "Generic Sensitive Topic Found (Robust)"}
 
+    # ثبت لاگ برای محتوای مجاز
+    if ip_address:
+        log_user_activity(ip_address, 'ALLOW', {
+            'action': 'ALLOW',
+            'reason': 'Content is clear.',
+            'content_preview': article_text[:100]
+        })
     return {"action": "ALLOW", "reason": "Content is clear."}
 
 
@@ -211,7 +324,31 @@ def home():
     with image_hash_lock:
         total_images = len(FORBIDDEN_IMAGE_HASHES)
 
-    return f"Python Content Filter API is running! Total keywords: {len(SENSITIVE_KEYWORDS)}. Total forbidden image hashes: {total_images}", 200
+    # تعداد لاگ‌های ذخیره شده
+    with USER_LOGS_LOCK:
+        total_logs = sum(len(logs) for logs in USER_LOGS.values())
+        unique_users = len(USER_LOGS)
+
+    return f"""
+    <html>
+        <head><title>Iran Blocker API</title></head>
+        <body>
+            <h1>Python Content Filter API is running!</h1>
+            <ul>
+                <li>Total keywords: {len(SENSITIVE_KEYWORDS)}</li>
+                <li>Total forbidden image hashes: {total_images}</li>
+                <li>Total users logged: {unique_users}</li>
+                <li>Total logs stored: {total_logs}</li>
+            </ul>
+            <p>API Endpoints:</p>
+            <ul>
+                <li><a href="/analyze_content_api">/analyze_content_api</a> (POST)</li>
+                <li><a href="/get_user_logs">/get_user_logs</a> (GET)</li>
+                <li><a href="/get_system_stats">/get_system_stats</a> (GET)</li>
+            </ul>
+        </body>
+    </html>
+    """, 200
 
 
 @app.route('/analyze_content_api', methods=['POST'])
@@ -219,16 +356,126 @@ def analyze_content_api():
     """
     نقطه پایانی که افزونه کروم آن را فراخوانی می‌کند (نیاز به توکن ندارد).
     """
+    ip_address = get_client_ip()
     data = request.get_json()
+
     if not data or 'content' not in data:
+        # ثبت لاگ خطا
+        log_user_activity(ip_address, 'ERROR', {
+            'error': 'No content provided',
+            'request_data': str(data)[:500]
+        })
         return jsonify({"error": "No content provided."}), 400
 
-    result = check_nested_api_logic(data['content'])
+    result = check_nested_api_logic(data['content'], ip_address)
+
+    # ثبت نتیجه تحلیل
+    log_user_activity(ip_address, 'ANALYSIS_RESULT', {
+        'result': result,
+        'content_length': len(data['content'].get('text', '')) if data.get('content') else 0,
+        'links_count': len(data['content'].get('links', [])) if data.get('content') else 0,
+        'images_count': len(data['content'].get('imageSources', [])) if data.get('content') else 0
+    })
+
     return jsonify(result)
+
+
+@app.route('/get_user_logs', methods=['GET'])
+def get_user_logs():
+    """
+    دریافت لاگ‌های کاربر بر اساس IP
+    """
+    ip_address = get_client_ip()
+    limit = request.args.get('limit', default=50, type=int)
+    activity_type = request.args.get('type', default=None, type=str)
+
+    with USER_LOGS_LOCK:
+        user_logs = USER_LOGS.get(ip_address, [])
+
+        # فیلتر بر اساس نوع فعالیت
+        if activity_type:
+            user_logs = [log for log in user_logs if log['activity_type'] == activity_type]
+
+        # مرتب سازی بر اساس زمان (جدیدترین اول)
+        user_logs.sort(key=lambda x: x['timestamp'], reverse=True)
+
+        # محدود کردن تعداد
+        user_logs = user_logs[:limit]
+
+    return jsonify({
+        'user_ip': ip_address,
+        'total_logs': len(USER_LOGS.get(ip_address, [])),
+        'filtered_logs': len(user_logs),
+        'logs': user_logs
+    })
+
+
+@app.route('/clear_user_logs', methods=['POST'])
+def clear_user_logs():
+    """
+    پاک‌سازی لاگ‌های کاربر
+    """
+    ip_address = get_client_ip()
+
+    with USER_LOGS_LOCK:
+        if ip_address in USER_LOGS:
+            deleted_count = len(USER_LOGS[ip_address])
+            del USER_LOGS[ip_address]
+            return jsonify({
+                'success': True,
+                'message': f'Deleted {deleted_count} logs for user {ip_address}',
+                'deleted_count': deleted_count
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'message': f'No logs found for user {ip_address}'
+            }), 404
+
+
+@app.route('/get_system_stats', methods=['GET'])
+def get_system_stats():
+    """
+    دریافت آمار سیستم
+    """
+    with USER_LOGS_LOCK:
+        total_users = len(USER_LOGS)
+        total_logs = sum(len(logs) for logs in USER_LOGS.values())
+
+        # آمار فعالیت‌ها
+        activity_stats = {}
+        for logs in USER_LOGS.values():
+            for log in logs:
+                activity_type = log['activity_type']
+                activity_stats[activity_type] = activity_stats.get(activity_type, 0) + 1
+
+    with image_hash_lock:
+        total_image_hashes = len(FORBIDDEN_IMAGE_HASHES)
+
+    with keyword_lock:
+        total_keywords = len(SENSITIVE_KEYWORDS)
+
+    return jsonify({
+        'system_stats': {
+            'total_users': total_users,
+            'total_logs': total_logs,
+            'total_image_hashes': total_image_hashes,
+            'total_keywords': total_keywords,
+            'forbidden_hosts': FORBIDDEN_HOSTS,
+            'log_retention_days': LOG_RETENTION_DAYS,
+            'max_logs_per_user': MAX_LOGS_PER_USER
+        },
+        'activity_stats': activity_stats,
+        'timestamp': time.time(),
+        'datetime': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    })
 
 
 # اجرای برنامه
 if __name__ == '__main__':
+    # پاک‌سازی لاگ‌های قدیمی در شروع
+    cleanup_old_logs()
+
     # این خط فقط برای اجرای محلی است.
     # در محیط ابری (مثل Render) اجرای Gunicorn از $PORT استفاده می‌کند.
     # تنظیم host='0.0.0.0' برای اجرای محلی روی تمام اینترفیس‌ها
