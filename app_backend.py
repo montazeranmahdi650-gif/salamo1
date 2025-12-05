@@ -26,8 +26,8 @@ FORBIDDEN_IMAGE_HASHES = set()
 # 🚨 سیستم لاگ‌گیری سروری
 LOG_DATA = {
     'blocked_requests': [],  # درخواست‌های بلاک شده
-    'analyses': [],         # تحلیل‌های انجام شده
-    'users': set()          # IP کاربران
+    'analyses': [],  # تحلیل‌های انجام شده
+    'users': set()  # IP کاربران
 }
 LOG_LOCK = Lock()
 MAX_LOGS = 1000
@@ -48,6 +48,7 @@ SENSITIVE_KEYWORDS = {
     r'(?:\s|^)قوه\sقضاییه', r'(?:\s|^)زندانی\sسیاسی', r'(?:\s|^)دیکتاتور'
 }
 
+
 # ========== سیستم لاگ‌گیری سروری ==========
 def get_client_ip():
     """دریافت IP کاربر"""
@@ -55,11 +56,12 @@ def get_client_ip():
         return request.headers.get('X-Forwarded-For').split(',')[0]
     return request.remote_addr
 
+
 def log_blocked_request(ip, url, action, reason, content_preview=""):
     """ثبت درخواست بلاک شده"""
     with LOG_LOCK:
         LOG_DATA['users'].add(ip)
-        
+
         log_entry = {
             'id': f"{int(time.time())}_{len(LOG_DATA['blocked_requests'])}",
             'timestamp': time.time(),
@@ -71,14 +73,15 @@ def log_blocked_request(ip, url, action, reason, content_preview=""):
             'content_preview': content_preview[:200] if content_preview else "",
             'user_agent': request.headers.get('User-Agent', 'Unknown')
         }
-        
+
         LOG_DATA['blocked_requests'].append(log_entry)
-        
+
         # محدود کردن تعداد لاگ‌ها
         if len(LOG_DATA['blocked_requests']) > MAX_LOGS:
             LOG_DATA['blocked_requests'] = LOG_DATA['blocked_requests'][-MAX_LOGS:]
-        
+
         return log_entry
+
 
 def log_analysis(ip, content_data, result):
     """ثبت تحلیل انجام شده"""
@@ -93,31 +96,32 @@ def log_analysis(ip, content_data, result):
             'result_action': result.get('action', 'UNKNOWN'),
             'result_reason': result.get('reason', ''),
             'has_forbidden_links': any(
-                any(host in link for host in FORBIDDEN_HOSTS) 
+                any(host in link for host in FORBIDDEN_HOSTS)
                 for link in content_data.get('links', [])
             ),
             'has_forbidden_images': any(
-                any(host in img for host in FORBIDDEN_HOSTS) 
+                any(host in img for host in FORBIDDEN_HOSTS)
                 for img in content_data.get('imageSources', [])
             )
         }
-        
+
         LOG_DATA['analyses'].append(log_entry)
-        
+
         if len(LOG_DATA['analyses']) > MAX_LOGS:
             LOG_DATA['analyses'] = LOG_DATA['analyses'][-MAX_LOGS:]
-        
+
         return log_entry
+
 
 def get_logs_stats():
     """دریافت آمار لاگ‌ها"""
     with LOG_LOCK:
         now = time.time()
         last_24h = now - 86400
-        
-        recent_logs = [log for log in LOG_DATA['blocked_requests'] 
-                      if log['timestamp'] > last_24h]
-        
+
+        recent_logs = [log for log in LOG_DATA['blocked_requests']
+                       if log['timestamp'] > last_24h]
+
         stats = {
             'total_blocks': len(LOG_DATA['blocked_requests']),
             'total_analyses': len(LOG_DATA['analyses']),
@@ -126,18 +130,19 @@ def get_logs_stats():
             'actions_distribution': defaultdict(int),
             'top_domains': defaultdict(int)
         }
-        
+
         for log in LOG_DATA['blocked_requests']:
             stats['actions_distribution'][log['action']] += 1
-            
+
             # استخراج دامنه از URL
             try:
                 domain = log['url'].split('//')[-1].split('/')[0]
                 stats['top_domains'][domain] += 1
             except:
                 pass
-        
+
         return stats
+
 
 # ========== توابع اصلی بدون تغییر ==========
 def get_image_hash(url):
@@ -163,12 +168,14 @@ def get_image_hash(url):
     except Exception:
         return None
 
+
 def normalize_text(text):
     text = str(text).lower()
     text = text.replace('ي', 'ی').replace('ك', 'ک')
     text = re.sub(r'[^\w\s]', '', text)
     text = re.sub(r'\s+', ' ', text).strip()
     return text
+
 
 def check_keyword_robust(article_text):
     normalized_text = normalize_text(article_text)
@@ -178,6 +185,7 @@ def check_keyword_robust(article_text):
             if re.search(pattern, normalized_text):
                 return True
     return False
+
 
 def simulate_learning(content_data):
     article_text = content_data.get('text', '')
@@ -210,6 +218,7 @@ def simulate_learning(content_data):
                     newly_added_hashes += 1
 
     return newly_added_keywords, newly_added_hashes
+
 
 def check_nested_api_logic(content_data):
     article_text = content_data.get('text', '')
@@ -257,14 +266,15 @@ def check_nested_api_logic(content_data):
 
     return {"action": "ALLOW", "reason": "Content is clear."}
 
+
 # ========== Endpoints جدید برای لاگ‌گیری ==========
 @app.route('/', methods=['GET'])
 def home():
     with image_hash_lock:
         total_images = len(FORBIDDEN_IMAGE_HASHES)
-    
+
     stats = get_logs_stats()
-    
+
     return f"""
     <html>
         <head>
@@ -359,7 +369,7 @@ def home():
         <body>
             <div class="container">
                 <h1>🚫 Iran Blocker API</h1>
-                
+
                 <div class="stats-grid">
                     <div class="stat-box">
                         <div class="stat-number">{stats['total_blocks']}</div>
@@ -382,7 +392,7 @@ def home():
                         <div class="stat-label">تصاویر ممنوعه</div>
                     </div>
                 </div>
-                
+
                 <div class="log-controls">
                     <h3>📊 مدیریت لاگ‌ها</h3>
                     <button class="btn btn-success" onclick="refreshLogs()">🔄 بروزرسانی لاگ‌ها</button>
@@ -390,7 +400,7 @@ def home():
                     <button class="btn btn-danger" onclick="clearLogs()">🧹 حذف همه لاگ‌ها</button>
                     <a class="btn" href="/logs_view">📋 مشاهده کامل لاگ‌ها</a>
                 </div>
-                
+
                 <div class="test-box">
                     <h3>🔍 تست عملکرد افزونه</h3>
                     <p>برای تست، روی لینک‌های زیر کلیک کنید:</p>
@@ -402,7 +412,7 @@ def home():
                     </p>
                     <p><small>⚠️ این سایت‌ها باید توسط افزونه مسدود شوند.</small></p>
                 </div>
-                
+
                 <h3>📈 آخرین بلاک‌ها</h3>
                 <div id="recent-logs">
                     <table>
@@ -420,32 +430,32 @@ def home():
                         </tbody>
                     </table>
                 </div>
-                
+
                 <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #ddd; color: #7f8c8d; font-size: 14px;">
                     <p>📅 آخرین بروزرسانی: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
                     <p>🌐 سرور: https://iran-blockers-o21z.onrender.com</p>
                     <p>📊 Endpoint لاگ‌ها: <code>/get_logs</code>, <code>/download_logs</code>, <code>/clear_logs</code></p>
                 </div>
             </div>
-            
+
             <script>
                 // بارگذاری اولیه لاگ‌ها
                 loadRecentLogs();
-                
+
                 async function loadRecentLogs() {{
                     try {{
                         const response = await fetch('/get_recent_logs');
                         const data = await response.json();
-                        
+
                         const tbody = document.getElementById('logs-table-body');
                         tbody.innerHTML = '';
-                        
+
                         data.logs.forEach(log => {{
                             const row = document.createElement('tr');
                             row.className = 'log-entry';
-                            
+
                             const actionClass = 'action-' + log.action.toLowerCase().replace(' ', '_');
-                            
+
                             row.innerHTML = `
                                 <td class="timestamp">${{log.datetime}}</td>
                                 <td><small>${{log.ip}}</small></td>
@@ -453,19 +463,19 @@ def home():
                                 <td>${{log.reason}}</td>
                                 <td><small>${{log.url.substring(0, 50)}}...</small></td>
                             `;
-                            
+
                             tbody.appendChild(row);
                         }});
                     }} catch (error) {{
                         console.error('خطا در بارگذاری لاگ‌ها:', error);
                     }}
                 }}
-                
+
                 async function refreshLogs() {{
                     await loadRecentLogs();
                     alert('✅ لاگ‌ها بروزرسانی شدند');
                 }}
-                
+
                 async function downloadLogs() {{
                     try {{
                         const response = await fetch('/download_logs');
@@ -483,13 +493,13 @@ def home():
                         console.error(error);
                     }}
                 }}
-                
+
                 async function clearLogs() {{
                     if (confirm('آیا مطمئن هستید که می‌خواهید همه لاگ‌ها را حذف کنید؟')) {{
                         try {{
                             const response = await fetch('/clear_logs', {{ method: 'POST' }});
                             const result = await response.json();
-                            
+
                             if (result.success) {{
                                 alert('✅ همه لاگ‌ها حذف شدند');
                                 loadRecentLogs();
@@ -502,7 +512,7 @@ def home():
                         }}
                     }}
                 }}
-                
+
                 // بروزرسانی خودکار هر 30 ثانیه
                 setInterval(loadRecentLogs, 30000);
             </script>
@@ -510,14 +520,15 @@ def home():
     </html>
     """, 200
 
+
 @app.route('/logs_view', methods=['GET'])
 def logs_view():
     """صفحه نمایش کامل لاگ‌ها"""
     stats = get_logs_stats()
-    
+
     with LOG_LOCK:
         all_logs = LOG_DATA['blocked_requests'][-100:]  # 100 تا آخرین
-    
+
     logs_html = ""
     for log in reversed(all_logs):
         action_class = f"action-{log['action'].lower().replace(' ', '_')}"
@@ -531,7 +542,7 @@ def logs_view():
             <td><small>{log['user_agent'][:40]}...</small></td>
         </tr>
         """
-    
+
     return f"""
     <html>
         <head>
@@ -564,7 +575,7 @@ def logs_view():
                         نمایش {len(all_logs)} لاگ از {stats['total_blocks']} لاگ
                     </span>
                 </div>
-                
+
                 <table>
                     <thead>
                         <tr>
@@ -581,7 +592,7 @@ def logs_view():
                     </tbody>
                 </table>
             </div>
-            
+
             <script>
                 async function downloadAllLogs() {{
                     const response = await fetch('/download_logs');
@@ -599,18 +610,19 @@ def logs_view():
     </html>
     """, 200
 
+
 @app.route('/analyze_content_api', methods=['POST'])
 def analyze_content_api():
     """Endpoint اصلی تحلیل"""
     ip = get_client_ip()
     data = request.get_json()
-    
+
     if not data or 'content' not in data:
         return jsonify({"error": "No content provided."}), 400
 
     content_data = data['content']
     result = check_nested_api_logic(content_data)
-    
+
     # ثبت لاگ در سیستم سروری
     log_blocked_request(
         ip=ip,
@@ -619,22 +631,24 @@ def analyze_content_api():
         reason=result['reason'],
         content_preview=content_data.get('text', '')[:200]
     )
-    
+
     log_analysis(ip, content_data, result)
-    
+
     return jsonify(result)
+
 
 @app.route('/get_recent_logs', methods=['GET'])
 def get_recent_logs():
     """دریافت 20 لاگ اخیر"""
     with LOG_LOCK:
         recent_logs = LOG_DATA['blocked_requests'][-20:]
-    
+
     return jsonify({
         'success': True,
         'count': len(recent_logs),
         'logs': recent_logs
     })
+
 
 @app.route('/get_logs', methods=['GET'])
 def get_logs():
@@ -648,6 +662,7 @@ def get_logs():
             'unique_users': list(LOG_DATA['users']),
             'total_logs': len(LOG_DATA['blocked_requests']) + len(LOG_DATA['analyses'])
         })
+
 
 @app.route('/download_logs', methods=['GET'])
 def download_logs():
@@ -664,11 +679,12 @@ def download_logs():
                 'forbidden_hosts': FORBIDDEN_HOSTS
             }
         }
-    
+
     response = jsonify(logs_data)
     response.headers.set('Content-Type', 'application/json')
     response.headers.set('Content-Disposition', 'attachment', filename=f'iran_blocker_logs_{int(time.time())}.json')
     return response
+
 
 @app.route('/clear_logs', methods=['POST'])
 def clear_logs():
@@ -677,12 +693,13 @@ def clear_logs():
         LOG_DATA['blocked_requests'] = []
         LOG_DATA['analyses'] = []
         LOG_DATA['users'] = set()
-    
+
     return jsonify({
         'success': True,
         'message': 'All logs cleared',
         'timestamp': time.time()
     })
+
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=os.environ.get('PORT', 5050))
