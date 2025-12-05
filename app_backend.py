@@ -211,7 +211,140 @@ def home():
     with image_hash_lock:
         total_images = len(FORBIDDEN_IMAGE_HASHES)
 
-    return f"Python Content Filter API is running! Total keywords: {len(SENSITIVE_KEYWORDS)}. Total forbidden image hashes: {total_images}", 200
+    # پیام تست سایت‌های ممنوعه
+    test_message = """
+    <div style="background-color: #f8f9fa; border-left: 4px solid #dc3545; padding: 15px; margin: 20px 0; border-radius: 5px;">
+        <h3 style="color: #dc3545; margin-top: 0;">🚫 تست افزونه Iran Blocker</h3>
+        <p>برای تست عملکرد افزونه، روی لینک‌های زیر کلیک کنید (باید بلاک شوند):</p>
+        <ul style="list-style-type: none; padding: 0;">
+            <li style="margin: 5px 0;">
+                <a href="https://www.nejatngo.org" target="_blank" style="color: #dc3545; text-decoration: none; font-weight: bold;">
+                    🔗 www.nejatngo.org
+                </a>
+            </li>
+            <li style="margin: 5px 0;">
+                <a href="https://www.hammihanonline.ir" target="_blank" style="color: #dc3545; text-decoration: none; font-weight: bold;">
+                    🔗 www.hammihanonline.ir
+                </a>
+            </li>
+            <li style="margin: 5px 0;">
+                <a href="https://www.dw.com" target="_blank" style="color: #dc3545; text-decoration: none; font-weight: bold;">
+                    🔗 www.dw.com
+                </a>
+            </li>
+            <li style="margin: 5px 0;">
+                <a href="https://www.melliun.org" target="_blank" style="color: #dc3545; text-decoration: none; font-weight: bold;">
+                    🔗 www.melliun.org
+                </a>
+            </li>
+        </ul>
+        <p style="color: #6c757d; font-size: 14px; margin-top: 10px;">
+            توجه: اگر افزونه به درستی نصب شده باشد، این سایت‌ها باید کاملاً بلاک شوند.
+        </p>
+    </div>
+    """
+
+    return f"""
+    <html>
+        <head>
+            <title>Iran Blocker API</title>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <style>
+                body {{
+                    font-family: Tahoma, Arial, sans-serif;
+                    line-height: 1.6;
+                    margin: 0;
+                    padding: 20px;
+                    background-color: #f5f5f5;
+                }}
+                .container {{
+                    max-width: 800px;
+                    margin: 0 auto;
+                    background: white;
+                    padding: 30px;
+                    border-radius: 10px;
+                    box-shadow: 0 0 20px rgba(0,0,0,0.1);
+                }}
+                h1 {{
+                    color: #2c3e50;
+                    border-bottom: 2px solid #3498db;
+                    padding-bottom: 10px;
+                }}
+                .stats {{
+                    background: #ecf0f1;
+                    padding: 15px;
+                    border-radius: 5px;
+                    margin: 20px 0;
+                }}
+                .api-info {{
+                    background: #e8f4fc;
+                    padding: 15px;
+                    border-radius: 5px;
+                    margin: 20px 0;
+                }}
+                .test-links a {{
+                    display: inline-block;
+                    margin: 5px;
+                    padding: 8px 15px;
+                    background: #e74c3c;
+                    color: white;
+                    text-decoration: none;
+                    border-radius: 5px;
+                    transition: background 0.3s;
+                }}
+                .test-links a:hover {{
+                    background: #c0392b;
+                }}
+                .footer {{
+                    margin-top: 30px;
+                    padding-top: 20px;
+                    border-top: 1px solid #ddd;
+                    color: #7f8c8d;
+                    font-size: 14px;
+                }}
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <h1>🚫 Iran Blocker API</h1>
+                
+                <div class="stats">
+                    <h3>📊 آمار سیستم</h3>
+                    <p>✅ Python Content Filter API is running!</p>
+                    <p><strong>تعداد کلمات کلیدی:</strong> {len(SENSITIVE_KEYWORDS)}</p>
+                    <p><strong>تعداد هش تصاویر ممنوعه:</strong> {total_images}</p>
+                </div>
+                
+                <div style="background-color: #fff3cd; border-left: 4px solid #ffc107; padding: 15px; margin: 20px 0; border-radius: 5px;">
+                    <h3 style="color: #856404; margin-top: 0;">🔍 تست عملکرد افزونه</h3>
+                    <p>برای اطمینان از عملکرد صحیح افزونه، لطفاً سایت‌های زیر را تست کنید:</p>
+                    <div class="test-links">
+                        <a href="https://www.nejatngo.org" target="_blank">www.nejatngo.org</a>
+                        <a href="https://www.hammihanonline.ir" target="_blank">www.hammihanonline.ir</a>
+                        <a href="https://www.dw.com" target="_blank">www.dw.com</a>
+                        <a href="https://www.melliun.org" target="_blank">www.melliun.org</a>
+                    </div>
+                    <p style="color: #856404; font-size: 14px; margin-top: 10px;">
+                        ⚠️ این سایت‌ها باید توسط افزونه Iran Blocker کاملاً مسدود شوند.
+                    </p>
+                </div>
+                
+                <div class="api-info">
+                    <h3>🔧 Endpoints API</h3>
+                    <p><strong>POST</strong> <code>/analyze_content_api</code> - تحلیل محتوا توسط افزونه</p>
+                    <p><strong>GET</strong> <code>/</code> - صفحه وضعیت (همین صفحه)</p>
+                </div>
+                
+                <div class="footer">
+                    <p>📅 آخرین به‌روزرسانی: {time.strftime('%Y-%m-%d %H:%M:%S')}</p>
+                    <p>🌐 سرور: https://iran-blockers-o21z.onrender.com</p>
+                    <p>⚙️ وضعیت: فعال ✅</p>
+                </div>
+            </div>
+        </body>
+    </html>
+    """, 200
 
 
 @app.route('/analyze_content_api', methods=['POST'])
